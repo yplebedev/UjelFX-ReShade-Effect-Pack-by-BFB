@@ -4,7 +4,7 @@
 
 uniform float hdr_modifier < __UNIFORM_SLIDER_FLOAT1
 	ui_min = 0.0; ui_max = 0.999;
-	ui_label = "HDR Mofifier";
+	ui_label = "HDR mofifier";
 > = 0.1;
 
 
@@ -18,6 +18,12 @@ uniform float post_exposure < __UNIFORM_SLIDER_FLOAT1
 	ui_label = "OUT exposure";
 > = 1;
 
+uniform float tonemapping_strength < __UNIFORM_SLIDER_FLOAT1
+	ui_min = 0.0; ui_max = 2.0;
+	ui_label = "Tonemapping intensity";
+	ui_tooltip = "A lerp between tonemapping with lottes, giving a more netural look, and a selected method.";
+> = 1;
+
 uniform float saturation< __UNIFORM_SLIDER_FLOAT1
 	ui_min = 0.0; ui_max = 2.0;
 	ui_label = "Saturation to compensate";
@@ -28,17 +34,12 @@ uniform float saturate_mid_fac< __UNIFORM_SLIDER_FLOAT1
 	ui_label = "Affect only midtones";
 > = 0.0;
 
-uniform float final_lerp <__UNIFORM_SLIDER_FLOAT1
-	ui_min = 0; ui_max = 2.0;
-	ui_label = "Effect strength";
-> = 1.0;
-
 uniform float blur_offset <
 	ui_type = "slider";
 	ui_min = 0.0;
 	ui_max = 20.0;
-	ui_label = "Blur Offset";
-	ui_tooltip = "Blur radius";
+	ui_label = "Blur radius";
+	ui_tooltip = "Fine-tune the radius of the blur.";
 > = 15.0;
 
 uniform float bloom_strength <
@@ -49,182 +50,154 @@ uniform float bloom_strength <
 	ui_tooltip = "How much bloom to add.";
 > = 0.2;
 
+// DO NOT USE.. FOR NOW. 
+//uniform float bloom_selectiveness <
+	//ui_type = "slider";
+	//ui_min = 0.0;
+	//ui_max = 10.0;
+	//ui_label = "Bloom selectiveness";
+	//ui_tooltip = "At 0, the entire image is considered. As the values go higher, only the brightest parts are considered.";
+//> = 0.8;
+
+uniform float bloom_threshold <
+	ui_type = "slider";
+	ui_min = 0.0;
+	ui_max = 2.0;
+	ui_label = "Bloom threshold";
+	ui_tooltip = "At 0, the entire image is considered. As the values go higher, increasingly brighter parts are.";
+> = 0.8;
+
+uniform float bloom_sat <
+	ui_type = "slider";
+	ui_min = 0.0;
+	ui_max = 2.0;
+	ui_label = "Bloom desaturation";
+	ui_tooltip = "How saturated the bloom is. Can be used as a smarter saturation slider, or to inverse the bloom color entirely.";
+> = 0.2;
+
+
 
 uniform float gamma_correct <> = 1;
 
 #include "ReShade.fxh"
 
-// BLURRING STUFF! 
-// HEAVILY inspired by zenteon, beeg ty!
 
-texture DTex0 { Width = BUFFER_WIDTH / 2; Height = BUFFER_HEIGHT / 2; Format = RGBA8; };
-texture DTex1 { Width = BUFFER_WIDTH / 4; Height = BUFFER_HEIGHT / 4; Format = RGBA8; };
-texture DTex2 { Width = BUFFER_WIDTH / 8; Height = BUFFER_HEIGHT / 8; Format = RGBA8; };
-texture DTex3 { Width = BUFFER_WIDTH / 16; Height = BUFFER_HEIGHT / 16; Format = RGBA8; };
-texture UTex0 { Width = BUFFER_WIDTH / 8; Height = BUFFER_HEIGHT / 8; Format = RGBA8; };
-texture UTex1 { Width = BUFFER_WIDTH / 4; Height = BUFFER_HEIGHT / 4; Format = RGBA8; };
-texture UTex2 { Width = BUFFER_WIDTH / 2; Height = BUFFER_HEIGHT / 2; Format = RGBA8; };
-texture UTex3 { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA8; };
+texture pretex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F; };
+sampler pretex_sampler { Texture = pretex; };
+
+// BLURRING STUFF! 
+// Slightly modified code, og by zenteon, beeg ty!
+
+texture DTex0 { Width = BUFFER_WIDTH / 2; Height = BUFFER_HEIGHT / 2; Format = RGBA16F; };
+texture DTex1 { Width = BUFFER_WIDTH / 4; Height = BUFFER_HEIGHT / 4; Format = RGBA16F; };
+texture DTex2 { Width = BUFFER_WIDTH / 8; Height = BUFFER_HEIGHT / 8; Format = RGBA16F; };
+texture DTex3 { Width = BUFFER_WIDTH / 16; Height = BUFFER_HEIGHT / 16; Format = RGBA16F; };
+texture DTex4 { Width = BUFFER_WIDTH / 32; Height = BUFFER_HEIGHT / 32; Format = RGBA16F; };
+texture UTex0 { Width = BUFFER_WIDTH / 16; Height = BUFFER_HEIGHT / 16; Format = RGBA16F; };
+texture UTex1 { Width = BUFFER_WIDTH / 8; Height = BUFFER_HEIGHT / 8; Format = RGBA16F; };
+texture UTex2 { Width = BUFFER_WIDTH / 4; Height = BUFFER_HEIGHT / 4; Format = RGBA16F; };
+texture UTex3 { Width = BUFFER_WIDTH / 2; Height = BUFFER_HEIGHT / 2; Format = RGBA16F; };
+texture UTex4 { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F; };
 
 sampler DownSam0 { Texture = DTex0; };
 sampler DownSam1 { Texture = DTex1; };
 sampler DownSam2 { Texture = DTex2; };
 sampler DownSam3 { Texture = DTex3; };
+sampler DownSam4 { Texture = DTex4; };
 sampler UpSam0 { Texture = UTex0; };
 sampler UpSam1 { Texture = UTex1; };
 sampler UpSam2 { Texture = UTex2; };
 sampler UpSam3 { Texture = UTex3; };
+sampler UpSam4 { Texture = UTex4; };
 
-float4 DownSample0(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
+uniform float3 luma_coeff = float3(0.2126, 0.7152, 0.0722);
+
+float4 Downsample(sampler samp, float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
 {
 	//float2 xy = texcoord;
 	float2 res = float2(BUFFER_WIDTH, BUFFER_HEIGHT) / 2.0;
     float2 hp = 0.5 / res;
     float offset = blur_offset;
 
-    float3 acc = tex2D(ReShade::BackBuffer, xy).rgb * 4.0;
-    acc += tex2D(ReShade::BackBuffer, xy - hp * offset).rgb;
-    acc += tex2D(ReShade::BackBuffer, xy + hp * offset).rgb;
-    acc += tex2D(ReShade::BackBuffer, xy + float2(hp.x, -hp.y) * offset).rgb;
-    acc += tex2D(ReShade::BackBuffer, xy - float2(hp.x, -hp.y) * offset).rgb;
+    float3 acc = tex2D(samp, xy).rgb * 4.0;
+    acc += tex2D(samp, xy - hp * offset).rgb;
+    acc += tex2D(samp, xy + hp * offset).rgb;
+    acc += tex2D(samp, xy + float2(hp.x, -hp.y) * offset).rgb;
+    acc += tex2D(samp, xy - float2(hp.x, -hp.y) * offset).rgb;
 
     return float4(acc / 8.0, 1.0);
 
+}
+
+float4 DownSample0(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
+{
+	return Downsample(pretex_sampler, vpos, xy);
 }
 
 float4 DownSample1(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
 {
-	//float2 xy = texcoord;
-	float2 res = float2(BUFFER_WIDTH, BUFFER_HEIGHT) / 2.0;
-    float2 hp = 0.5 / res;
-    float offset = blur_offset;
-
-    float3 acc = tex2D(DownSam0, xy).rgb * 4.0;
-    acc += tex2D(DownSam0, xy - hp * offset).rgb;
-    acc += tex2D(DownSam0, xy + hp * offset).rgb;
-    acc += tex2D(DownSam0, xy + float2(hp.x, -hp.y) * offset).rgb;
-    acc += tex2D(DownSam0, xy - float2(hp.x, -hp.y) * offset).rgb;
-
-    return float4(acc / 8.0, 1.0);
-
+	return Downsample(DownSam0, vpos, xy);
 }
 
 float4 DownSample2(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
 {
-	//float2 xy = texcoord;
-	float2 res = float2(BUFFER_WIDTH, BUFFER_HEIGHT) / 2.0;
-    float2 hp = 0.5 / res;
-    float offset = blur_offset;
-
-    float3 acc = tex2D(DownSam1, xy).rgb * 4.0;
-    acc += tex2D(DownSam1, xy - hp * offset).rgb;
-    acc += tex2D(DownSam1, xy + hp * offset).rgb;
-    acc += tex2D(DownSam1, xy + float2(hp.x, -hp.y) * offset).rgb;
-    acc += tex2D(DownSam1, xy - float2(hp.x, -hp.y) * offset).rgb;
-
-    return float4(acc / 8.0, 1.0);
-
+	return Downsample(DownSam1, vpos, xy);
 }
 
 float4 DownSample3(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
 {
+	return Downsample(DownSam2, vpos, xy);
+}
+
+float4 DownSample4(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
+{
+	return Downsample(DownSam3, vpos, xy);
+}
+
+float4 Upsample(sampler samp, float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
+{
 	//float2 xy = texcoord;
 	float2 res = float2(BUFFER_WIDTH, BUFFER_HEIGHT) / 2.0;
     float2 hp = 0.5 / res;
     float offset = blur_offset;
+	float3 acc = tex2D(samp, xy + float2(-hp.x * 2.0, 0.0) * offset).rgb;
+    
+    acc += tex2D(samp, xy + float2(-hp.x, hp.y) * offset).rgb * 2.0;
+    acc += tex2D(samp, xy + float2(0.0, hp.y * 2.0) * offset).rgb;
+    acc += tex2D(samp, xy + float2(hp.x, hp.y) * offset).rgb * 2.0;
+    acc += tex2D(samp, xy + float2(hp.x * 2.0, 0.0) * offset).rgb;
+    acc += tex2D(samp, xy + float2(hp.x, -hp.y) * offset).rgb * 2.0;
+    acc += tex2D(samp, xy + float2(0.0, -hp.y * 2.0) * offset).rgb;
+    acc += tex2D(samp, xy + float2(-hp.x, -hp.y) * offset).rgb * 2.0;
 
-    float3 acc = tex2D(DownSam1, xy).rgb * 4.0;
-    acc += tex2D(DownSam2, xy - hp * offset).rgb;
-    acc += tex2D(DownSam2, xy + hp * offset).rgb;
-    acc += tex2D(DownSam2, xy + float2(hp.x, -hp.y) * offset).rgb;
-    acc += tex2D(DownSam2, xy - float2(hp.x, -hp.y) * offset).rgb;
-
-    return float4(acc / 8.0, 1.0);
-
+    return float4(acc / 12.0, 1.0);
 }
 
 float4 UpSample0(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
 {
-	//float2 xy = texcoord;
-	float2 res = float2(BUFFER_WIDTH, BUFFER_HEIGHT) / 2.0;
-    float2 hp = 0.5 / res;
-    float offset = blur_offset;
-	float3 acc = tex2D(DownSam3, xy + float2(-hp.x * 2.0, 0.0) * offset).rgb;
-    
-    acc += tex2D(DownSam3, xy + float2(-hp.x, hp.y) * offset).rgb * 2.0;
-    acc += tex2D(DownSam3, xy + float2(0.0, hp.y * 2.0) * offset).rgb;
-    acc += tex2D(DownSam3, xy + float2(hp.x, hp.y) * offset).rgb * 2.0;
-    acc += tex2D(DownSam3, xy + float2(hp.x * 2.0, 0.0) * offset).rgb;
-    acc += tex2D(DownSam3, xy + float2(hp.x, -hp.y) * offset).rgb * 2.0;
-    acc += tex2D(DownSam3, xy + float2(0.0, -hp.y * 2.0) * offset).rgb;
-    acc += tex2D(DownSam3, xy + float2(-hp.x, -hp.y) * offset).rgb * 2.0;
-
-    return float4(acc / 12.0, 1.0);
+	return Upsample(DownSam4, vpos, xy);
 }
-
-
 
 float4 UpSample1(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
 {
-	//float2 xy = texcoord;
-	float2 res = float2(BUFFER_WIDTH, BUFFER_HEIGHT) / 2.0;
-    float2 hp = 0.5 / res;
-    float offset = blur_offset;
-	float3 acc = tex2D(UpSam0, xy + float2(-hp.x * 2.0, 0.0) * offset).rgb;
-    
-    acc += tex2D(UpSam0, xy + float2(-hp.x, hp.y) * offset).rgb * 2.0;
-    acc += tex2D(UpSam0, xy + float2(0.0, hp.y * 2.0) * offset).rgb;
-    acc += tex2D(UpSam0, xy + float2(hp.x, hp.y) * offset).rgb * 2.0;
-    acc += tex2D(UpSam0, xy + float2(hp.x * 2.0, 0.0) * offset).rgb;
-    acc += tex2D(UpSam0, xy + float2(hp.x, -hp.y) * offset).rgb * 2.0;
-    acc += tex2D(UpSam0, xy + float2(0.0, -hp.y * 2.0) * offset).rgb;
-    acc += tex2D(UpSam0, xy + float2(-hp.x, -hp.y) * offset).rgb * 2.0;
-
-    return float4(acc / 12.0, 1.0);
+	return Upsample(UpSam0, vpos, xy);
 }
 
 float4 UpSample2(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
 {
-	//float2 xy = texcoord;
-	float2 res = float2(BUFFER_WIDTH, BUFFER_HEIGHT) / 2.0;
-    float2 hp = 0.5 / res;
-    float offset = blur_offset;
-	float3 acc = tex2D(UpSam0, xy + float2(-hp.x * 2.0, 0.0) * offset).rgb;
-    
-    acc += tex2D(UpSam1, xy + float2(-hp.x, hp.y) * offset).rgb * 2.0;
-    acc += tex2D(UpSam1, xy + float2(0.0, hp.y * 2.0) * offset).rgb;
-    acc += tex2D(UpSam1, xy + float2(hp.x, hp.y) * offset).rgb * 2.0;
-    acc += tex2D(UpSam1, xy + float2(hp.x * 2.0, 0.0) * offset).rgb;
-    acc += tex2D(UpSam1, xy + float2(hp.x, -hp.y) * offset).rgb * 2.0;
-    acc += tex2D(UpSam1, xy + float2(0.0, -hp.y * 2.0) * offset).rgb;
-    acc += tex2D(UpSam1, xy + float2(-hp.x, -hp.y) * offset).rgb * 2.0;
+	return Upsample(UpSam1, vpos, xy);
 
-    return float4(acc / 12.0, 1.0);
 }
 
 float4 UpSample3(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
 {
-	//float2 xy = texcoord;
-	float2 res = float2(BUFFER_WIDTH, BUFFER_HEIGHT) / 2.0;
-    float2 hp = 0.5 / res;
-    float offset = blur_offset;
-	float3 acc = tex2D(UpSam2, xy + float2(-hp.x * 2.0, 0.0) * offset).rgb;
-    
-    acc += tex2D(UpSam2, xy + float2(-hp.x, hp.y) * offset).rgb * 2.0;
-    acc += tex2D(UpSam2, xy + float2(0.0, hp.y * 2.0) * offset).rgb;
-    acc += tex2D(UpSam2, xy + float2(hp.x, hp.y) * offset).rgb * 2.0;
-    acc += tex2D(UpSam2, xy + float2(hp.x * 2.0, 0.0) * offset).rgb;
-    acc += tex2D(UpSam2, xy + float2(hp.x, -hp.y) * offset).rgb * 2.0;
-    acc += tex2D(UpSam2, xy + float2(0.0, -hp.y * 2.0) * offset).rgb;
-    acc += tex2D(UpSam2, xy + float2(-hp.x, -hp.y) * offset).rgb * 2.0;
-
-    return float4(acc / 12.0, 1.0);
+	return Upsample(UpSam2, vpos, xy);
 }
 
-
-
-texture pretex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA8; };
-sampler pretex_sampler { Texture = pretex; };
+float4 UpSample4(float4 vpos : SV_Position, float2 xy : TexCoord) : SV_Target
+{
+	return Upsample(UpSam3, vpos, xy);
+}
 
 float max3(float x, float y, float z) {
 	return max(x, max(y, z)); 
@@ -233,6 +206,11 @@ float max3(float x, float y, float z) {
 float3 inv_t(float3 t) {
 	float3 max = max3(t.r, t.g, t.b);
 	return pow(t, gamma_correct) * rcp(1 - max * hdr_modifier) * pre_exposure;
+}
+
+float3 t(float3 t) {
+	float3 max = max3(t.r, t.g, t.b);
+	return t * rcp(max + 1.0);
 }
 
 float3 aces(float3 x) {
@@ -272,22 +250,34 @@ float3 filmic(float3 x) {
 }
 
 float3 prepare(float2 texcoord : TEXCOORD) : SV_Target { 
-	return inv_t(tex2D(ReShade::BackBuffer, texcoord).rgb);
+	float3 i = inv_t(tex2D(ReShade::BackBuffer, texcoord).rgb);
+	float luma = dot(i.rgb, luma_coeff);
+	float bloom_mask = 0.0;
+	if (luma > bloom_threshold) { bloom_mask = 1.0; }
+	return lerp(i, luma, bloom_sat) * bloom_mask;
+}
+
+float3 adapt(float3 t, float2 texcoord) {
+	float3 smoothbase = tex2D(UpSam1, texcoord).rgb;
+	float luma = dot(smoothbase, luma_coeff);
+	return t; //ToDo: make it woerk!
 }
 
 
 void final(float2 texcoord : TEXCOORD, out float4 res : SV_Target0) {
-	float4 blurred = tex2D(UpSam3, texcoord);
+	float3 bloom = tex2D(UpSam3, texcoord).rgb;
 	float3 base = inv_t(tex2D(ReShade::BackBuffer, texcoord).rgb);
 	
-	float3 bloom = lerp(base, blurred.rgb, bloom_strength);
+	float3 composite = adapt(lerp(base, bloom, bloom_strength), texcoord);
 	
-	res.rgb = aces(bloom) * post_exposure;
+	// Default-ey look lerp.
+	res.rgb = lerp(pow(t(composite), rcp(gamma_correct)), aces(composite), tonemapping_strength);
+	
+	res.rgb = res.rgb * post_exposure;
 	res.a = 1.0;
-	float luma = dot(res.rgb, float3(0.229, 0.587, 0.114));
+	float luma = dot(res.rgb, luma_coeff);
 	float affected = abs(luma - 0.5) * saturate_mid_fac;
 	res = lerp(float4(luma, luma, luma, 1.0), res, saturation - affected);
-	res = lerp(base, res.rgb, final_lerp);
 }
 
 technique BFBsHDR {
@@ -318,6 +308,11 @@ technique BFBsHDR {
 	}
 	pass {
 		VertexShader = PostProcessVS;
+		PixelShader = DownSample4;
+		RenderTarget = DTex4;
+	}
+	pass {
+		VertexShader = PostProcessVS;
 		PixelShader = UpSample0;
 		RenderTarget = UTex0;
 	}
@@ -335,6 +330,11 @@ technique BFBsHDR {
 		VertexShader = PostProcessVS;
 		PixelShader = UpSample3;
 		RenderTarget = UTex3;
+	}
+	pass {
+		VertexShader = PostProcessVS;
+		PixelShader = UpSample4;
+		RenderTarget = UTex4;
 	}
 	pass {
 		VertexShader = PostProcessVS;
