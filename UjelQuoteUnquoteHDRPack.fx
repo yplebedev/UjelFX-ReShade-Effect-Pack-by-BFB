@@ -26,12 +26,12 @@ uniform float tonemapping_strength < __UNIFORM_SLIDER_FLOAT1
 
 uniform float saturation< __UNIFORM_SLIDER_FLOAT1
 	ui_min = 0.0; ui_max = 2.0;
-	ui_label = "Saturation to compensate";
+	ui_label = "Saturation [USE SEPARATE SHADER]";
 > = 1;
 
 uniform float saturate_mid_fac< __UNIFORM_SLIDER_FLOAT1
 	ui_min = -2.0; ui_max = 2.0;
-	ui_label = "Affect only midtones";
+	ui_label = "Affect only midtones [USE SEPARATE SHADER]";
 > = 0.0;
 
 uniform float blur_offset <
