@@ -50,7 +50,7 @@ uniform float bloom_strength <
 	ui_tooltip = "How much bloom to add.";
 > = 0.2;
 
-// DO NOT USE.. FOR NOW. 
+// DO NOT USE.. FOR NOW. Or maybe ever, this method is meh at best.
 //uniform float bloom_selectiveness <
 	//ui_type = "slider";
 	//ui_min = 0.0;
@@ -76,8 +76,11 @@ uniform float bloom_sat <
 > = 0.2;
 
 
+uniform bool hl_apap_noc <ui_label = "HL but gordon is not ok"; ui_tooltip = "Half-Life but gordon forgot his glasses, took APAP-NOC at midday and took some other bad shit as well.";> 
+= false;
+// and be thankful that it is
 
-uniform float gamma_correct <> = 1;
+uniform float gamma_correct <> = 2.2;
 
 #include "ReShade.fxh"
 
@@ -95,7 +98,7 @@ texture DTex3 { Width = BUFFER_WIDTH / 16; Height = BUFFER_HEIGHT / 16; Format =
 texture DTex4 { Width = BUFFER_WIDTH / 32; Height = BUFFER_HEIGHT / 32; Format = RGBA16F; };
 texture UTex0 { Width = BUFFER_WIDTH / 16; Height = BUFFER_HEIGHT / 16; Format = RGBA16F; };
 texture UTex1 { Width = BUFFER_WIDTH / 8; Height = BUFFER_HEIGHT / 8; Format = RGBA16F; };
-texture UTex2 { Width = BUFFER_WIDTH / 4; Height = BUFFER_HEIGHT / 4; Format = RGBA16F; };
+texture UTex2 { Width = BUFFER_WIDTH / 4; Height = BUFFER_HEIGHT / 4; Format = RGBA16F; MipLevels = 8; }; // RIGHT HERE!
 texture UTex3 { Width = BUFFER_WIDTH / 2; Height = BUFFER_HEIGHT / 2; Format = RGBA16F; };
 texture UTex4 { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F; };
 
@@ -249,7 +252,7 @@ float3 filmic(float3 x) {
   return pow(result, float3(2.2, 2.2, 2.2));
 }
 
-float3 prepare(float2 texcoord : TEXCOORD) : SV_Target { 
+float3 prepare(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : SV_Target { 
 	float3 i = inv_t(tex2D(ReShade::BackBuffer, texcoord).rgb);
 	float luma = dot(i.rgb, luma_coeff);
 	float bloom_mask = 0.0;
@@ -257,28 +260,40 @@ float3 prepare(float2 texcoord : TEXCOORD) : SV_Target {
 	return lerp(i, luma, bloom_sat) * bloom_mask;
 }
 
-float3 adapt(float3 t, float2 texcoord) {
-	float3 smoothbase = tex2D(UpSam1, texcoord).rgb;
-	float luma = dot(smoothbase, luma_coeff);
-	return t; //ToDo: make it woerk!
-}
+texture final_texture { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F; };
+sampler final_sampler { Texture = final_texture; };
 
 
-void final(float2 texcoord : TEXCOORD, out float4 res : SV_Target0) {
+float4 final(float2 texcoord : TEXCOORD) : SV_Target {
+	float4 res;
 	float3 bloom = tex2D(UpSam3, texcoord).rgb;
 	float3 base = inv_t(tex2D(ReShade::BackBuffer, texcoord).rgb);
 	
-	float3 composite = adapt(lerp(base, bloom, bloom_strength), texcoord);
+	float3 composite = lerp(base, bloom, bloom_strength);
+	
+	// Crack mode.
+	if (hl_apap_noc) {
+		float3 adapt = tex2Dlod(UpSam2, float4(texcoord, 0, 3)).rgb;
+		float adapt_luma = dot(adapt, luma_coeff);
+		
+		float composite_luma = dot(composite, luma_coeff);
+		float mix_luma = lerp(composite_luma, adapt_luma, 0.9);
+		composite = composite - composite_luma + mix_luma;
+	}
 	
 	// Default-ey look lerp.
 	res.rgb = lerp(pow(t(composite), rcp(gamma_correct)), aces(composite), tonemapping_strength);
 	
 	res.rgb = res.rgb * post_exposure;
 	res.a = 1.0;
+
+	
 	float luma = dot(res.rgb, luma_coeff);
 	float affected = abs(luma - 0.5) * saturate_mid_fac;
-	res = lerp(float4(luma, luma, luma, 1.0), res, saturation - affected);
+	res = lerp(float4(luma, luma, luma, 1.0), res, saturation - affected); 
+	return res;
 }
+
 
 technique BFBsHDR {
 	pass prepare {
@@ -336,7 +351,7 @@ technique BFBsHDR {
 		PixelShader = UpSample4;
 		RenderTarget = UTex4;
 	}
-	pass {
+	pass final{
 		VertexShader = PostProcessVS;
 		PixelShader = final;
 	}
