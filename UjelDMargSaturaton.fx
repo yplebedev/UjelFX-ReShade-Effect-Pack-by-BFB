@@ -2,7 +2,8 @@
 #include "ReShade.fxh"
 
 uniform float saturation <ui_min = 0; ui_max = 8.0; ui_type = "slider"; ui_label = "Saturation";> = 1;
-uniform float final_lerp <ui_min = 0; ui_max = 2.0; ui_type = "slider"; ui_label = "Lerp";> = 0.5;
+uniform float final_lerp <ui_min = 0; ui_max = 2.0; ui_type = "slider"; ui_label = "Lerp";> = 1;
+uniform float desat_gamma <ui_min = 0; ui_max = 2.0; ui_type = "slider"; ui_label = "Desaturation squish";> = 1.0;
 uniform bool do_overlay <ui_label = "Dark and Gritty";> = false;
 
 uniform bool grit_mode<ui_label = "Enable desaturation only";> = false;
@@ -67,11 +68,12 @@ void main(float2 texcoord : Texcoord, out float4 res : SV_Target0) {
 	
 	float3 base = tex2D(ReShade::BackBuffer, texcoord).rgb;
 	float3 lab = SRGBtoOKLAB(base);
+	float chroma = sqrt(lab.y * lab.y + lab.z * lab.z); 
 	float luma = lab.x;
 	float3 luma3 = float3(luma, luma, luma);
 	
-	float3 desaturated_by_sat = lerp(base, luma3, lab.y * lab.z);
-	float3 desaturated_by_luma = lerp(base, luma3, 1 - luma);
+	float3 desaturated_by_sat = lerp(base, luma3, pow(chroma, desat_gamma));
+	float3 desaturated_by_luma = lerp(base, luma3, pow(1 - luma, desat_gamma));
 	float3 desaturated = lerp(desaturated_by_sat, desaturated_by_luma, 0.5);
 	
 
