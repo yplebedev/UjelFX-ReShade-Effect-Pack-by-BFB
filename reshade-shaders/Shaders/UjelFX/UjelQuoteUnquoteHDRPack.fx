@@ -56,31 +56,6 @@ uniform float bloom_strength <
 	ui_tooltip = "How much bloom to add.";
 > = 0.2;
 
-uniform float bloom_dither <
-	ui_type = "slider";
-	ui_min = 0.0;
-	ui_max = 1.0;
-	ui_label = "Bloom dithering strength";
-	ui_tooltip = "At 0, no dithering is added, and as such, the image is softer. \nAt 1, some quanitization artefacts are hidden, and the image is more stylized.\nGenerally ill-advised, but can be used for more *style*";
-> = 0;
-
-uniform float bloom_dither_rand <
-	ui_type = "slider";
-	ui_min = 0.0;
-	ui_max = 1.0;
-	ui_label = "Rejection probability";
-	ui_tooltip = "At 0, the dither is regular, but higher values break up the uniformity, but may increase the percieved noise.";
-> = 0.1;
-
-// DO NOT USE.. FOR NOW. Or maybe ever, this method is meh at best.
-//uniform float bloom_selectiveness <
-	//ui_type = "slider";
-	//ui_min = 0.0;
-	//ui_max = 10.0;
-	//ui_label = "Bloom selectiveness";
-	//ui_tooltip = "At 0, the entire image is considered. As the values go higher, only the brightest parts are considered.";
-//> = 0.8;
-
 uniform float bloom_threshold <
 	ui_type = "slider";
 	ui_min = 0.0;
@@ -112,11 +87,6 @@ sampler pretex_sampler { Texture = pretex; };
 
 // BLURRING STUFF! 
 // Slightly modified code, og by zenteon, beeg ty!
-
-//texture DTex0 { Width = BUFFER_WIDTH / 2; Height = BUFFER_HEIGHT / 2; Format = RGBA16F; };
-//texture DTex1 { Width = BUFFER_WIDTH / 4; Height = BUFFER_HEIGHT / 4; Format = RGBA16F; };
-//texture DTex2 { Width = BUFFER_WIDTH / 8; Height = BUFFER_HEIGHT / 8; Format = RGBA16F; };
-//texture DTex3 { Width = BUFFER_WIDTH / 16; Height = BUFFER_HEIGHT / 16; Format = RGBA16F; };
 
 // Old bs removed, thanks to papadanku for pointing out that this is a bit memory-inefficient.
 
@@ -325,20 +295,6 @@ float3 ujel(float3 x) {
 	return clamp(z * 0.48773612105 / (pow(p, 3.3) * 0.1 + 2), 0, 1);
 }
 
-int get_bayer(int2 i) {
-    static const int bayer[8 * 8] = {
-          0, 48, 12, 60,  3, 51, 15, 63,
-         32, 16, 44, 28, 35, 19, 47, 31,
-          8, 56,  4, 52, 11, 59,  7, 55,
-         40, 24, 36, 20, 43, 27, 39, 23,
-          2, 50, 14, 62,  1, 49, 13, 61,
-         34, 18, 46, 30, 33, 17, 45, 29,
-         10, 58,  6, 54,  9, 57,  5, 53,
-         42, 26, 38, 22, 41, 25, 37, 21
-    };
-    return bayer[i.x + 8 * i.y];
-}
-
 float3 tonemap(float3 x) {
 	if (tonemapper == 0) { return aces(x); }
 	if (tonemapper == 1) { return filmic(x); }
@@ -360,32 +316,10 @@ float3 prepare(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : SV_Targe
 	return lerp(i, luma, bloom_sat) * bloom_mask;
 }
 
-texture dithered_texture { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F; };
-sampler dithered_sam { Texture = dithered_texture; };
-
-texture noise_tex < source = "bluenoise.png"; > { Width = 64; Height = 64; Format = RGBA8; };
-sampler noise { Texture = noise_tex; };
-
-
-float4 dither(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : SV_Target {
-	float4 res;
-	res.a = 1;
-	float4 blurred = tex2D(BSam5, texcoord);
-	float rand = tex2D(noise, frac(texcoord * 100)).g;
-	
-	int2 index = int2(texcoord * ReShade::ScreenSize) % 8;
-    float limit = (float(get_bayer(index) + 1) / 64.0) * step(index.x, 8);
-    res.rgb = step(limit, tex2D(BSam5, texcoord)).rgb;
-	
-	if (rand < bloom_dither_rand) { return blurred; }
-	
-	return lerp(res, blurred, 1 - bloom_dither);
-}
 
 float4 final(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : SV_Target {
 	float4 res;
-	float3 random = tex2D(noise, frac(texcoord * 100)).rgb;
-	float3 bloom = tex2D(dithered_sam, texcoord).rgb;
+	float3 bloom = tex2D(BSam5, texcoord).rgb;
 	float3 base = inv_t(tex2D(ReShade::BackBuffer, texcoord).rgb);
 	
 	float3 composite = lerp(base, bloom, bloom_strength);
@@ -472,11 +406,7 @@ technique BFBsHDR {
 		PixelShader = UpSample4;
 		RenderTarget = BTex5;
 	}
-	pass dither {
-		VertexShader = PostProcessVS;
-		PixelShader = dither;
-		RenderTarget = dithered_texture;
-	}
+
 	pass final{
 		VertexShader = PostProcessVS;
 		PixelShader = final;
