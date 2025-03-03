@@ -6,31 +6,31 @@ uniform float hdr_modifier < __UNIFORM_SLIDER_FLOAT1
 	ui_min = 1.0; ui_max = 20;
 	ui_label = "HDR modifier";
 	ui_tooltip = "How much to stretch out the highlights into HDR. Only defined for Lottes and Reinhard.\nFor Lottes, it acts as a multiplier, while for Reinhard it sets the whitepoint directly.";
+	ui_category = "Inverse Tonemapping";
 > = 0.1;
 
 uniform int hdr_mode <
 	ui_type = "combo"; ui_label = "HDR Extrapolation algorithm";
 	ui_items = "Lottes\0Reinhard\0ACES\0";
+	ui_category = "Inverse Tonemapping";
 > = 0;
 
 uniform float reinhard_saturation <ui_min = 0.0; ui_max = 1; ui_type = "slider";
 	ui_label = "Reinhard saturation intensity";
+	ui_category = "Inverse Tonemapping";
 > = 0.7;
 
 uniform float pre_exposure < __UNIFORM_SLIDER_FLOAT1
 	ui_min = 0.0; ui_max = 2.0;
 	ui_label = "IN exposure";
-> = 1;
-
-uniform float post_exposure < __UNIFORM_SLIDER_FLOAT1
-	ui_min = 0.0; ui_max = 2.0;
-	ui_label = "OUT exposure";
+	ui_category = "Inverse Tonemapping";
 > = 1;
 
 uniform float tonemapping_strength < __UNIFORM_SLIDER_FLOAT1
 	ui_min = 0.0; ui_max = 1.0;
 	ui_label = "Tonemapping intensity";
 	ui_tooltip = "A lerp between tonemapping with lottes, giving a more netural look, and a selected method.";
+	ui_category = "Tonemapping";
 > = 1;
 
 uniform int tonemapper<
@@ -38,17 +38,8 @@ uniform int tonemapper<
 	ui_label = "Tonemapper";
 	ui_tooltip = "Selects what function should be used for toning the image down.\nThis is your style option.\nMost functions are ports from https://github.com/dmnsgn/glsl-tone-map/";
 	ui_items = "ACES\0Filmic\0Kronos Neutral\0Lottes\0Reinhard\0Reinhard, but better\0Uncharted 2\0Unreal 3\0BFB's Own Tonemapper (VERY, VERY GRIYTTY)\0";
+	ui_category = "Tonemapping";
 > = 0;
-
-uniform float saturation< __UNIFORM_SLIDER_FLOAT1
-	ui_min = 0.0; ui_max = 2.0;
-	ui_label = "Saturation [USE SEPARATE SHADER]";
-> = 1;
-
-uniform float saturate_mid_fac< __UNIFORM_SLIDER_FLOAT1
-	ui_min = -2.0; ui_max = 2.0;
-	ui_label = "Affect only midtones [USE SEPARATE SHADER]";
-> = 0.0;
 
 uniform float blur_offset <
 	ui_type = "slider";
@@ -56,6 +47,7 @@ uniform float blur_offset <
 	ui_max = 20.0;
 	ui_label = "Blur radius";
 	ui_tooltip = "Fine-tune the radius of the blur.";
+	ui_category = "Bloom";
 > = 15.0;
 
 uniform float bloom_strength <
@@ -64,15 +56,8 @@ uniform float bloom_strength <
 	ui_max = 1.0;
 	ui_label = "Bloom intensity";
 	ui_tooltip = "How much bloom to add.";
+	ui_category = "Bloom";
 > = 0.2;
-
-uniform float bloom_threshold <
-	ui_type = "slider";
-	ui_min = 0.0;
-	ui_max = 2.0;
-	ui_label = "Bloom threshold";
-	ui_tooltip = "At 0, the entire image is considered. As the values go higher, increasingly brighter parts are.";
-> = 0.8;
 
 uniform float bloom_sat <
 	ui_type = "slider";
@@ -80,14 +65,33 @@ uniform float bloom_sat <
 	ui_max = 2.0;
 	ui_label = "Bloom desaturation";
 	ui_tooltip = "How saturated the bloom is. Can be used as a smarter way to add color, or to inverse the bloom chroma entirely.\nHowever, this is based on luma -> default lerping, and isn't particularly accurate.";
+	ui_category = "Bloom";
 > = 0.2;
 
+uniform bool bloom_dissolve <ui_label = "[ToDo!] Do dissolve mixing for bloom"; ui_category = "Bloom";> = false;
 
-/*uniform bool hl_apap_noc <ui_label = "Crack toggle"; ui_tooltip = "Do not.";> 
-= false;*/
-// and be thankful that it is
+texture noise <source = "ujeldissolve.png";> { Width = 512; Height = 512; Format = RGBA8; };
+sampler dissolve { Texture = noise; };
 
-uniform float gamma_correct <> = 2.2;
+uniform float post_exposure < __UNIFORM_SLIDER_FLOAT1
+	ui_min = 0.0; ui_max = 2.0;
+	ui_label = "OUT exposure";
+	ui_category = "Corrections";
+> = 1;
+
+uniform float saturate_mid_fac< __UNIFORM_SLIDER_FLOAT1
+	ui_min = -2.0; ui_max = 2.0;
+	ui_label = "Affect only midtones [USE SEPARATE SHADER]";
+	ui_category = "Corrections";
+> = 0.0;
+
+uniform float saturation< __UNIFORM_SLIDER_FLOAT1
+	ui_min = 0.0; ui_max = 2.0;
+	ui_label = "Saturation [USE SEPARATE SHADER]";
+	ui_category = "Corrections";
+> = 1;
+
+uniform float gamma_correct <ui_category = "Corrections";> = 2.2;
 
 #include "ReShade.fxh"
 
@@ -203,6 +207,7 @@ float max3(float x, float y, float z) {
 }
 
 float3 inv_t(float3 t) {
+	t *= pre_exposure;
     t = pow(saturate(t), 2.2);
     if (hdr_mode == 1) {
     	float luma = dot(t, luma_coeff);
@@ -330,9 +335,7 @@ float3 tonemap(float3 x) {
 float3 prepare(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : SV_Target { 
 	float3 i = inv_t(tex2D(ReShade::BackBuffer, texcoord).rgb);
 	float luma = dot(i.rgb, luma_coeff);
-	float bloom_mask = 0.0;
-	if (luma > bloom_threshold) { bloom_mask = 1.0; }
-	return lerp(i, luma, bloom_sat) * bloom_mask;
+	return lerp(i, luma, bloom_sat);
 }
 
 
@@ -341,7 +344,14 @@ float4 final(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : SV_Target 
 	float3 bloom = tex2D(BSam5, texcoord).rgb;
 	float3 base = inv_t(tex2D(ReShade::BackBuffer, texcoord).rgb);
 	
-	float3 composite = lerp(base, bloom, bloom_strength);
+	float3 composite = float3(0, 0, 0);
+	if (!bloom_dissolve) {
+		composite = lerp(base, bloom, bloom_strength);
+	} else {
+		float rand = tex2Dfetch(dissolve, texcoord).r;
+		if (rand > bloom_strength) composite = bloom;
+		else composite = base;
+	}
 	
 	composite *= post_exposure;
 	res.rgb = lerp(reinhard(composite), tonemap(composite), tonemapping_strength);
