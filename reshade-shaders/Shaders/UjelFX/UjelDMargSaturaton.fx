@@ -63,7 +63,7 @@ float3 overlay_mix(float3 top, float3 bottom, float strength) {
 	return lerp(result, bottom, strength);
 }
 
-void main(float2 texcoord : Texcoord, out float4 res : SV_Target0) {
+void main(float4 vpos : SV_Position, float2 texcoord : Texcoord, out float4 res : SV_Target0) {
 	res.a = 1;
 	
 	float3 base = tex2D(ReShade::BackBuffer, texcoord).rgb;

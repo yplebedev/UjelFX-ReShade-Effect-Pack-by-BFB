@@ -1,11 +1,21 @@
 #include "ReShadeUI.fxh"
 #define vec3 float3
+// fuck
 
 uniform float hdr_modifier < __UNIFORM_SLIDER_FLOAT1
-	ui_min = 0.0; ui_max = 0.999;
-	ui_label = "HDR mofifier";
+	ui_min = 1.0; ui_max = 20;
+	ui_label = "HDR modifier";
+	ui_tooltip = "How much to stretch out the highlights into HDR. Only defined for Lottes and Reinhard.\nFor Lottes, it acts as a multiplier, while for Reinhard it sets the whitepoint directly.";
 > = 0.1;
 
+uniform int hdr_mode <
+	ui_type = "combo"; ui_label = "HDR Extrapolation algorithm";
+	ui_items = "Lottes\0Reinhard\0ACES\0";
+> = 0;
+
+uniform float reinhard_saturation <ui_min = 0.0; ui_max = 1; ui_type = "slider";
+	ui_label = "Reinhard saturation intensity";
+> = 0.7;
 
 uniform float pre_exposure < __UNIFORM_SLIDER_FLOAT1
 	ui_min = 0.0; ui_max = 2.0;
@@ -18,7 +28,7 @@ uniform float post_exposure < __UNIFORM_SLIDER_FLOAT1
 > = 1;
 
 uniform float tonemapping_strength < __UNIFORM_SLIDER_FLOAT1
-	ui_min = 0.0; ui_max = 2.0;
+	ui_min = 0.0; ui_max = 1.0;
 	ui_label = "Tonemapping intensity";
 	ui_tooltip = "A lerp between tonemapping with lottes, giving a more netural look, and a selected method.";
 > = 1;
@@ -193,8 +203,17 @@ float max3(float x, float y, float z) {
 }
 
 float3 inv_t(float3 t) {
-	float3 max = max3(t.r, t.g, t.b);
-	return pow(t, gamma_correct) * rcp(1 - max * hdr_modifier) * pre_exposure;
+    t = pow(saturate(t), 2.2);
+    if (hdr_mode == 1) {
+    	float luma = dot(t, luma_coeff);
+    	float3 chroma = t - float3(luma, luma, luma);
+    	float luma_tonemapped = max(-luma / (luma - 1 - rcp(hdr_modifier)), 0.0);
+    	return lerp(luma_tonemapped + chroma, max(-t / (t - 1 - rcp(hdr_modifier)), 0.0), reinhard_saturation);
+    }
+    if (hdr_mode == 0) {
+    	return t * rcp(max(1.0 - max3(t.r, t.g, t.b) * hdr_modifier / 10, 0.1));
+    }
+    return (sqrt(-10127. * t * t + 13702. * t + 9.) + 59. * t - 3.) / (502. - 486. * t);
 }
 
 float3 t(float3 t) {
@@ -235,7 +254,7 @@ float3 neutral(float3 color) {
 float3 filmic(float3 x) {
   float3 X = max(float3(0.0, 0.0, 0.0), x - 0.004);
   float3 result = (X * (6.2 * X + 0.5)) / (X * (6.2 * X + 1.7) + 0.06);
-  return pow(result, float3(2.2, 2.2, 2.2));
+  return result;
 }
 
 vec3 lottes(vec3 x) {
@@ -256,7 +275,7 @@ vec3 lottes(vec3 x) {
 }
 
 vec3 reinhard(vec3 x) {
-  return x / (1.0 + x);
+  return pow(x / (1.0 + x), rcp(gamma_correct));
 }
 
 vec3 reinhard2(vec3 x) {
@@ -305,7 +324,7 @@ float3 tonemap(float3 x) {
 	if (tonemapper == 6) { return uncharted2(x); }
 	if (tonemapper == 7) { return unreal(x); }
 	if (tonemapper == 8) { return ujel(x); }
-	return x;
+	return pow(x, rcp(gamma_correct));
 }
 
 float3 prepare(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : SV_Target { 
@@ -318,33 +337,14 @@ float3 prepare(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : SV_Targe
 
 
 float4 final(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : SV_Target {
-	float4 res;
+	float4 res = 0.0;
 	float3 bloom = tex2D(BSam5, texcoord).rgb;
 	float3 base = inv_t(tex2D(ReShade::BackBuffer, texcoord).rgb);
 	
 	float3 composite = lerp(base, bloom, bloom_strength);
 	
-	// Crack mode.
-	// Enable at your own risk.
-	/*if (hl_apap_noc) {
-		float3 adapt = tex2Dlod(UpSam2, float4(texcoord, 0, 3)).rgb;
-		float adapt_luma = dot(adapt, luma_coeff);
-		
-		float composite_luma = dot(composite, luma_coeff);
-		float mix_luma = lerp(composite_luma, adapt_luma, 0.9);
-		composite = composite - composite_luma + mix_luma;
-	}*/
-	
-	// Default-ey look lerp.
-	res.rgb = lerp(pow(t(composite), rcp(gamma_correct)), tonemap(composite), tonemapping_strength);
-	
-	res.rgb = res.rgb * post_exposure;
-	res.a = 1.0;
-
-	
-	float luma = dot(res.rgb, luma_coeff);
-	float affected = abs(luma - 0.5) * saturate_mid_fac;
-	res = lerp(float4(luma, luma, luma, 1.0), res, saturation - affected);
+	composite *= post_exposure;
+	res.rgb = lerp(reinhard(composite), tonemap(composite), tonemapping_strength);
 	return res;
 }
 
