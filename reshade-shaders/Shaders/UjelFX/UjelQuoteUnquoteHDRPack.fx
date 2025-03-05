@@ -1,6 +1,7 @@
 #include "ReShadeUI.fxh"
 #define vec3 float3
-// fuck
+// IF I EVER GET MY HANDS ON KHRONOS GROUP AHH DEF
+#define NOISE_TEX_NAME "QuarkBN - UJFX.png"
 
 uniform float hdr_modifier < __UNIFORM_SLIDER_FLOAT1
 	ui_min = 1.0; ui_max = 20;
@@ -68,10 +69,14 @@ uniform float bloom_sat <
 	ui_category = "Bloom";
 > = 0.2;
 
-uniform bool bloom_dissolve <ui_label = "[ToDo!] Do dissolve mixing for bloom"; ui_category = "Bloom";> = false;
+//uniform bool bloom_dissolve <ui_label = "Do noisy mixing for bloom"; ui_category = "Bloom";> = false;
+uniform float dissolve_lerp <ui_label = "Noisy mixing method"; ui_category = "Bloom"; ui_min = 0; ui_max = 1; ui_type = "slider";> = 0.5;
 
-texture noise <source = "ujeldissolve.png";> { Width = 512; Height = 512; Format = RGBA8; };
-sampler dissolve { Texture = noise; };
+texture noise < source = NOISE_TEX_NAME; > { Width = 512; Height = 512; Format = RGBA8; };
+sampler dissolve { Texture = noise; MagFilter = POINT; MinFilter = POINT;
+	AddressU = REPEAT;
+	AddressV = REPEAT;
+	AddressW = REPEAT; };
 
 uniform float post_exposure < __UNIFORM_SLIDER_FLOAT1
 	ui_min = 0.0; ui_max = 2.0;
@@ -209,21 +214,16 @@ float max3(float x, float y, float z) {
 float3 inv_t(float3 t) {
 	t *= pre_exposure;
     t = pow(saturate(t), 2.2);
-    if (hdr_mode == 1) {
+    switch (hdr_mode) {
+    case (1) :
     	float luma = dot(t, luma_coeff);
     	float3 chroma = t - float3(luma, luma, luma);
     	float luma_tonemapped = max(-luma / (luma - 1 - rcp(hdr_modifier)), 0.0);
     	return lerp(luma_tonemapped + chroma, max(-t / (t - 1 - rcp(hdr_modifier)), 0.0), reinhard_saturation);
-    }
-    if (hdr_mode == 0) {
+    case (0) :
     	return t * rcp(max(1.0 - max3(t.r, t.g, t.b) * hdr_modifier / 10, 0.1));
     }
     return (sqrt(-10127. * t * t + 13702. * t + 9.) + 59. * t - 3.) / (502. - 486. * t);
-}
-
-float3 t(float3 t) {
-	float3 max = max3(t.r, t.g, t.b);
-	return t * rcp(max + 1.0);
 }
 
 float3 aces(float3 x) {
@@ -276,7 +276,7 @@ vec3 lottes(vec3 x) {
       (pow(hdrMax, a * d) * pow(midIn, a) - pow(hdrMax, a) * pow(midIn, a * d) * midOut) /
       ((pow(hdrMax, a * d) - pow(midIn, a * d)) * midOut);
 
-  return pow(x, a) / (pow(x, a * d) * b + c);
+  return pow(pow(x, a) / (pow(x, a * d) * b + c), rcp(gamma_correct));
 }
 
 vec3 reinhard(vec3 x) {
@@ -320,15 +320,17 @@ float3 ujel(float3 x) {
 }
 
 float3 tonemap(float3 x) {
-	if (tonemapper == 0) { return aces(x); }
-	if (tonemapper == 1) { return filmic(x); }
-	if (tonemapper == 2) { return neutral(x); }
-	if (tonemapper == 3) { return lottes(x); }
-	if (tonemapper == 4) { return reinhard(x); }
-	if (tonemapper == 5) { return reinhard2(x); }
-	if (tonemapper == 6) { return uncharted2(x); }
-	if (tonemapper == 7) { return unreal(x); }
-	if (tonemapper == 8) { return ujel(x); }
+	switch (tonemapper) {
+		case (0) : return aces(x);
+		case (1) : return filmic(x); 
+		case (2) : return neutral(x); 
+		case (3) : return lottes(x); 
+		case (4) : return reinhard(x); 
+		case (5) : return reinhard2(x); 
+		case (6) : return uncharted2(x); 
+		case (7) : return unreal(x); 
+		case (8) : return ujel(x); 
+	}
 	return pow(x, rcp(gamma_correct));
 }
 
@@ -345,16 +347,21 @@ float4 final(float4 vpos : SV_Position, float2 texcoord : TEXCOORD) : SV_Target 
 	float3 base = inv_t(tex2D(ReShade::BackBuffer, texcoord).rgb);
 	
 	float3 composite = float3(0, 0, 0);
-	if (!bloom_dissolve) {
+	if (dissolve_lerp == 1) {
 		composite = lerp(base, bloom, bloom_strength);
 	} else {
-		float rand = tex2Dfetch(dissolve, texcoord).r;
-		if (rand > bloom_strength) composite = bloom;
+		float rand = saturate(tex2Dfetch(dissolve, vpos.xy % 512).r);
+		if (rand < bloom_strength) composite = bloom;
 		else composite = base;
+		composite = lerp(composite, lerp(base, bloom, bloom_strength), dissolve_lerp);
 	}
 	
 	composite *= post_exposure;
-	res.rgb = lerp(reinhard(composite), tonemap(composite), tonemapping_strength);
+	switch (hdr_mode) {
+		case (0): res.rgb = lerp(lottes(composite), tonemap(composite), tonemapping_strength); break;
+		case (1): res.rgb = lerp(reinhard(composite), tonemap(composite), tonemapping_strength); break;
+		case (2): res.rgb = lerp(aces(composite), tonemap(composite), tonemapping_strength); break;
+	}
 	return res;
 }
 
