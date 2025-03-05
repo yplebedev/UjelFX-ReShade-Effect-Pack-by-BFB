@@ -6,3 +6,5 @@ Ujel Saturation - a shader that lets you boost saturation without it looking to 
 
 
 For bugs/suggestions take a peek in https://discord.gg/TWubqCpnmA.
+
+REST for HL2, since it's quite useful: https://pastebin.com/EcAgjniU
