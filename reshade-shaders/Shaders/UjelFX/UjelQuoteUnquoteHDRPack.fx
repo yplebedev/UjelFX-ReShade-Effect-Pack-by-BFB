@@ -42,6 +42,15 @@ uniform int tonemapper<
 	ui_category = "Tonemapping";
 > = 0;
 
+uniform int aces_type<
+	ui_type = "combo";
+	ui_label = "ACES tonemapper type";
+	ui_tooltip = "ACES is a SLOW function, and as such, UJHDR provides a few modes.";
+	ui_items = "Complex fit\0BFB fit (MUTED)\0Unreal 3 fit\0";
+	ui_category = "Tonemapping";
+> = 0;
+
+
 uniform float blur_offset <
 	ui_type = "slider";
 	ui_min = 0.0;
@@ -226,14 +235,32 @@ float3 inv_t(float3 t) {
     return (sqrt(-10127. * t * t + 13702. * t + 9.) + 59. * t - 3.) / (502. - 486. * t);
 }
 
+float3 unreal(float3 x) {
+  return x / (x + 0.155) * 1.019;
+}
+
 float3 aces(float3 x) {
 // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
-  const float a = 2.51;
-  const float b = 0.03;
-  const float c = 2.43;
-  const float d = 0.59;
-  const float e = 0.14;
-  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+// ACES fit by me!!!
+// and unreal3.
+	float3 res = float3(0., 0., 0.);
+	switch (aces_type) {
+	case (0):
+  	const float a = 2.51;
+ 	 const float b = 0.03;
+  	const float c = 2.43;
+  	const float d = 0.59;
+  	const float e = 0.14;
+ 	 res = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+ 	 break;
+	case (1):
+		res = smoothstep(x / (0.8 * pow(x - 1, 3) + 6.3), 0, 1);
+		break;
+	case (2):
+		res = unreal(x);
+		break;
+	}
+	return res;
 }
 
 float3 neutral(float3 color) {
@@ -305,10 +332,6 @@ vec3 uncharted2(vec3 color) {
   vec3 curr = uncharted2Tonemap(exposureBias * color);
   vec3 whiteScale = 1.0 / uncharted2Tonemap(vec3(W, W, W));
   return curr * whiteScale;
-}
-
-vec3 unreal(vec3 x) {
-  return x / (x + 0.155) * 1.019;
 }
 
 float3 ujel(float3 x) {
