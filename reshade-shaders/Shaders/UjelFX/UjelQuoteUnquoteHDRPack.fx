@@ -67,7 +67,7 @@ uniform int tonemapper<
 	ui_type = "combo";
 	ui_label = "Tonemapper";
 	ui_tooltip = "Selects what function should be used for toning the image down.\nThis is your style option.\nMost functions are ports from https://github.com/dmnsgn/glsl-tone-map/";
-	ui_items = "ACES\0Filmic\0Kronos Neutral\0Lottes\0Reinhard\0Reinhard, but better\0Uncharted 2\0BFB's Own Tonemapper (VERY, VERY GRIYTTY)\0";
+	ui_items = "ACES\0Filmic\0Kronos Neutral\0Lottes\0Reinhard\0Reinhard, but better\0Uncharted 2\0AgX\0";
 	ui_category = "Tonemapping";
 > = 0;
 
@@ -75,7 +75,7 @@ uniform int aces_type<
 	ui_type = "combo";
 	ui_label = "ACES tonemapper type";
 	ui_tooltip = "ACES is a SLOW function, and as such, UJHDR provides a few modes.";
-	ui_items = "ACES Narkowicz\0My fit, muted\0Unreal 3 fit\0Unreal Engine 4\0";
+	ui_items = "ACES Narkowicz\0My fit\0Unreal 3 fit\0Unreal Engine 4\0";
 	ui_category = "ACES preferences";
 > = 0;
 

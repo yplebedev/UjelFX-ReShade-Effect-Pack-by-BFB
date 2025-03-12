@@ -110,12 +110,12 @@ float3 aces(float3 x) {
 	 	 res = clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 	 	 break;
 		case (1):
-			res = smoothstep(x / (0.8 * pow(x - 1, 3) + 6.3), 0, 1);
+			res = 18 * x / (pow(x, 2) - 2*x + 6.3);
+			res = res / (res + 1);
 			break;
 		case (2):
 			res = unreal(x);
 			break;
-			
 		case (3):	
 			res.r = aces_per_channel(x.r);		
 			res.g = aces_per_channel(x.g);
@@ -197,12 +197,11 @@ vec3 uncharted2(vec3 color) {
   return curr * whiteScale;
 }
 
-float3 ujel(float3 x) {
-	// Only tonemapper made by me. 
-	// It's admittedly a sad attemt, and it maps [0, 5] to [0, something subtly lower then 1]
-	float3 p = clamp(x, 0, 5);
-	float3 z = pow(p, 2.4);
-	return clamp(z * 0.48773612105 / (pow(p, 3.3) * 0.1 + 2), 0, 1);
+float3 agx(float3 color) {
+    // AgX tonemapping curve approximation
+    // Parameters derived to match the AgX response
+    float3 tonemappedColor = color / (color + float3(0.155, 0.155, 0.155)) * 1.019; // Simple approximation
+    return tonemappedColor;
 }
 
 float3 tonemap(float3 x) {
@@ -214,7 +213,7 @@ float3 tonemap(float3 x) {
 		case (4) : return reinhard(x); 
 		case (5) : return reinhard2(x); 
 		case (6) : return uncharted2(x);  
-		case (7) : return ujel(x); 
+		case (7) : return agx(x);
 	}
 	return pow(x, rcp(gamma_correct));
 }
