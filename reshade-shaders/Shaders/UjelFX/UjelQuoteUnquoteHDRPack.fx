@@ -84,6 +84,7 @@ uniform float slope <
 	ui_label = "Slope";
 	ui_tooltip = "Use this to tweak the contrast";
 	ui_category = "ACES preferences";
+	ui_min = 0.01; ui_max = 1.0;
 	> = 0.88;
 
 uniform float toe <
@@ -91,6 +92,7 @@ uniform float toe <
 	ui_label = "Toe";
 	ui_tooltip = "Use this to correct the shadows.";
 	ui_category = "ACES preferences";
+	ui_min = -1.0; ui_max = 4.0;
 	> = 0.55;
 	
 uniform float shoulder <
@@ -98,6 +100,7 @@ uniform float shoulder <
 	ui_label = "Shoulder";
 	ui_tooltip = "Use this to tweak the highlights.";
 	ui_category = "ACES preferences";
+	ui_min = -1.0; ui_max = 1.0;
 	> = 0.26;
 	
 uniform float black_c <
